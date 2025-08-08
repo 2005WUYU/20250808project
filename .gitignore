@@ -1,0 +1,28 @@
+# 排除你的两个虚拟环境文件夹
+0802/
+729/
+
+# 其他常见的 Python 虚拟环境文件夹
+venv/
+env/
+.venv/
+
+# Python 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 日志文件
+*.log
+
+# IDE 或编辑器相关文件
+.idea/          # PyCharm
+.vscode/        # VS Code（可选，视情况保留）
+*.DS_Store      # macOS 系统文件
+
+# 其他可能的依赖文件
+Pipfile.lock    # 如果使用 Pipenv
+*.egg-info/
+dist/
+build/
