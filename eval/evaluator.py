@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from typing import Dict, Any, Optional, Union, List, Tuple
 import time
+from sklearn import metrics
 
 from trainer.data_loop import adapt_batch_to_schema, select_template_for_batch
 from eval.metrics_hooks import (
@@ -99,6 +100,10 @@ class Evaluator:
                 # Generate fake samples
                 fake_batch = G(z, template=template_batch)
                 
+                # Convert generator output to standard format if needed
+                if not isinstance(fake_batch, dict):
+                    fake_batch = data_adapter.adapt_batch(fake_batch)
+                
                 # Compute metrics
                 metrics = self.compute_metrics(fake_batch, batch, D)
                 batch_metrics.append(metrics)
@@ -127,7 +132,10 @@ class Evaluator:
         
         # Calculate ROC/AUC if labels are available
         if all_labels and all_scores:
-            all_metrics.update(self.compute_anomaly_detection_metrics(all_scores, all_labels))
+            all_metrics.update(self.compute_anomaly_detection_metrics(
+                np.concatenate(all_scores),
+                np.concatenate(all_labels)
+            ))
         
         # Finalize metrics
         all_metrics['eval_time'] = time.time() - start_time
@@ -153,4 +161,68 @@ class Evaluator:
         recon_loss = reconstruction_loss(
             fake_batch, 
             real_batch, 
-            mode=self.cfg.get('recon_mode', '
+            mode=self.cfg.get('recon_mode', 'l2')
+        ).item()
+        metrics['recon_loss'] = recon_loss
+        
+        # Discriminator scores
+        fake_scores = D(fake_batch)
+        real_scores = D(real_batch)
+        
+        # Wasserstein distance estimate
+        from losses.adversarial import estimate_wasserstein_distance
+        w_dist = estimate_wasserstein_distance(real_scores, fake_scores)
+        metrics['wasserstein_dist'] = w_dist
+        
+        # Graph structure metrics
+        graph_metrics = compute_graph_stats_distance(fake_batch, real_batch)
+        metrics.update(graph_metrics)
+        
+        # Spectral metrics
+        spectral_metrics = compute_spectral_metrics(fake_batch, real_batch)
+        metrics.update(spectral_metrics)
+        
+        # Edge length metrics
+        edge_metrics = compute_edge_length_metrics(fake_batch, real_batch)
+        metrics.update(edge_metrics)
+        
+        return metrics
+    
+    def compute_anomaly_detection_metrics(self, scores: np.ndarray, labels: np.ndarray) -> Dict[str, float]:
+        """
+        Compute anomaly detection metrics (AUROC, AP).
+        
+        Args:
+            scores: Anomaly scores
+            labels: Ground truth labels (1 for anomaly, 0 for normal)
+            
+        Returns:
+            Dictionary of anomaly detection metrics
+        """
+        # Check if we have both anomalies and normal samples
+        if np.all(labels == 0) or np.all(labels == 1):
+            return {'auroc': np.nan, 'ap': np.nan}
+        
+        # Compute AUROC
+        auroc = metrics.roc_auc_score(labels, scores)
+        
+        # Compute average precision
+        ap = metrics.average_precision_score(labels, scores)
+        
+        return {
+            'auroc': float(auroc),
+            'ap': float(ap)
+        }
+    
+    def sample_noise(self, shape: List[int], device: torch.device = None) -> torch.Tensor:
+        """
+        Sample noise vector from normal distribution.
+        
+        Args:
+            shape: Shape of the noise tensor
+            device: Device to create tensor on
+            
+        Returns:
+            Noise tensor
+        """
+        return torch.randn(*shape, device=device)
